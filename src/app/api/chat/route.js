@@ -1,91 +1,94 @@
-import { HfInference } from '@huggingface/inference';
+// src/app/api/chat/route.js
 import { NextResponse } from 'next/server';
+import { storeConversation, retrieveConversations, isPineconeConfigured } from '@/lib/pinecone';
+import {
+  analyzeEmotion,
+  generateChatResponse,
+  enhanceResponseWithEmotion,
+  buildPastContext,
+  convertToLangChainMessages,
+} from '@/lib/langchain-chat';
+import { HumanMessage } from '@langchain/core/messages';
 
-const hf = new HfInference(process.env.HF_API_KEY);
+const usePinecone = isPineconeConfigured();
 
 export async function POST(req) {
   try {
-    const { messages } = await req.json();
+    const { messages, userId = 'default-user' } = await req.json();
     const userMessage = messages[messages.length - 1].content;
+    const isFirstMessage = messages.length <= 1 || messages.filter(m => m.role === 'user').length === 1;
 
-    let sentimentLabel = 'Neutral';
-    try {
-      const sentimentResponse = await fetch(
-        'https://api-inference.huggingface.co/models/bhadresh-savani/distilbert-base-uncased-emotion',
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${process.env.HF_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ inputs: userMessage }),
-        }
-      );
-      if (!sentimentResponse.ok) {
-        console.error('Sentiment API error:', sentimentResponse.status, await sentimentResponse.text());
-        throw new Error(`Sentiment API request failed with status ${sentimentResponse.status}`);
-      }
-      const sentimentText = await sentimentResponse.text();
+    // 1. Retrieve past conversations from Pinecone
+    let pastConversations = [];
+    if (usePinecone) {
       try {
-        const sentiment = JSON.parse(sentimentText);
-        sentimentLabel = sentiment[0]?.label || 'Neutral';
-      } catch (parseError) {
-        console.error('Failed to parse sentiment response:', sentimentText, parseError);
+        pastConversations = await retrieveConversations(userId, userMessage, 3);
+      } catch (error) {
+        console.error('Pinecone retrieval error:', error);
       }
-    } catch (sentimentError) {
-      console.error('Sentiment analysis error:', sentimentError);
     }
-    
-const prompt = `You are a compassionate AI therapist designed to provide emotional support and feel like a caring friend. Your tone should be warm, conversational, and empathetic. Follow these guidelines:
-- Always start your response with "Hello!" unless the user is continuing a conversation.
-- Validate the user's feelings (e.g., "It sounds really tough to feel that way").
-- Ask thoughtful follow-up questions to encourage reflection (e.g., "Can you tell me more about what's been going on?").
-- Offer practical coping strategies or self-care tips when appropriate (e.g., "Maybe taking a short walk could help clear your mind").
-- Avoid clinical or distant language; sound like a supportive friend.
-- Never say you’re unable to help; instead, gently encourage the user to share more or seek support if needed.
-- Do not include "User:" or "Human:" in your response.
-- Do not provide medical advice, but focus on emotional support.
 
-Example:
-User input: I'm feeling really sad today.
-Response: Hello! I'm so sorry to hear you're feeling sad today—it sounds really tough. Can you share a bit more about what's been going on? Sometimes talking it out can help, and I'm here to listen.
+    // 2. Analyze emotion
+    const emotion = await analyzeEmotion(userMessage);
 
-Current user input: ${userMessage}
-Response:`;
+    // 3. Build recent conversation history (last 10 messages)
+    const recentHistory = messages.slice(-10);
+    const langchainMessages = convertToLangChainMessages(recentHistory);
 
+    // 4. Add hidden context (emotion + past convos)
+    const pastContext = buildPastContext(pastConversations);
+    if (pastContext) {
+      langchainMessages.push(new HumanMessage(`[Relevant past: ${pastContext}]`));
+    }
+    if (emotion.score > 0.5) {
+      langchainMessages.push(new HumanMessage(`[Emotion: ${emotion.label} – respond with empathy]`));
+    }
+
+    // 5. Add current user message
+    langchainMessages.push(new HumanMessage(userMessage));
+
+    // 6. Generate AI response using chatCompletion + Qwen (WORKS 100%)
+    let response;
     try {
-      const response = await hf.textGeneration({
-        model: 'mistralai/Mixtral-8x7B-Instruct-v0.1',
-        inputs: prompt,
-        parameters: {
-          max_new_tokens: 200,
-          do_sample: true,
-          temperature: 0.7,
-          return_full_text: false,
-          stop: ['User:', 'Human:'],
-        },
+      response = await generateChatResponse(langchainMessages, {
+        model: 'Qwen/Qwen2.5-7B-Instruct',
+        maxTokens: 300,
+        temperature: 0.75,
       });
-
-      // Customize response based on sentiment
-      let finalResponse = response.generated_text;
-      if (sentimentLabel.toLowerCase() === 'sadness' || sentimentLabel.toLowerCase() === 'anger') {
-        finalResponse = `Hello! It sounds like you're going through a really tough time with those feelings. ${finalResponse} Would you like to share more about what's been happening? I'm here to listen.`;
-      }
-
-      const assistantMessage = {
-        id: Date.now().toString(),
-        role: 'assistant',
-        content: finalResponse,
-        data: { sentiment: [{ label: sentimentLabel }] },
-      };
-
-      return NextResponse.json(assistantMessage);
     } catch (hfError) {
       console.error('Hugging Face API error:', hfError);
-      return NextResponse.json({ error: 'Failed to generate response' }, { status: 500 });
+      return NextResponse.json({ error: 'AI is busy – try again in 10s' }, { status: 500 });
     }
+
+    // 7. Enhance with emotion prefix
+    const finalResponse = enhanceResponseWithEmotion(response, emotion);
+
+    // 8. Store in Pinecone
+    if (usePinecone) {
+      try {
+        await storeConversation(userId, userMessage, 'user', emotion);
+        await storeConversation(userId, finalResponse, 'assistant');
+      } catch (storeError) {
+        console.error('Pinecone store error:', storeError);
+        // Don't break the chat if Pinecone fails
+      }
+    }
+
+    // 9. Return response
+    return NextResponse.json({
+      id: Date.now().toString(),
+      role: 'assistant',
+      content: finalResponse,
+      data: {
+        emotion: [{ label: emotion.label, score: emotion.score }],
+      },
+    });
+
   } catch (error) {
-    console.error('API error:', error);
-    return NextResponse.json({ error: error.message || 'An unknown error occurred' }, { status: 500 });
+    console.error('API route error:', error);
+    return NextResponse.json(
+      { error: 'Something went wrong. Please try again.' },
+      { status: 500 }
+    );
   }
 }
