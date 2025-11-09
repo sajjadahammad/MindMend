@@ -5,9 +5,9 @@
   "framework": "nextjs",
   "regions": ["iad1"],
   "env": {
-    "HF_API_KEY": "@hf_api_key",
-    "PINECONE_API_KEY": "@pinecone_api_key",
-    "PINECONE_INDEX_NAME": "@pinecone_index_name"
+    "HF_API_KEY": "@HF_API_KEY",
+    "PINECONE_API_KEY": "@PINECONE_API_KEY",
+    "PINECONE_INDEX_NAME": "@PINECONE_INDEX_NAME"
   }
 }
 
