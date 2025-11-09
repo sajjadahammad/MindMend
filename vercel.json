@@ -3,12 +3,7 @@
   "devCommand": "npm run dev",
   "installCommand": "npm install --legacy-peer-deps",
   "framework": "nextjs",
-  "regions": ["iad1"],
-  "env": {
-    "HF_API_KEY": "@HF_API_KEY",
-    "PINECONE_API_KEY": "@PINECONE_API_KEY",
-    "PINECONE_INDEX_NAME": "@PINECONE_INDEX_NAME"
-  }
+  "regions": ["iad1"]
 }
 
 
