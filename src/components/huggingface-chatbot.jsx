@@ -2,6 +2,14 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { Brain, Send } from 'lucide-react'
+import { 
+  extractUserName, 
+  getEmotionColor, 
+  getWelcomeMessage, 
+  buildContextPrefix,
+  storeUserName,
+  getUserName
+} from '@/lib/utils'
 
 export function HuggingFaceChatbot() {
   const [messages, setMessages] = useState([])
@@ -12,7 +20,7 @@ export function HuggingFaceChatbot() {
 
   // Load user name from localStorage on mount
   useEffect(() => {
-    const storedName = localStorage.getItem('mindmend_user_name')
+    const storedName = getUserName()
     if (storedName) {
       setUserName(storedName)
     }
@@ -22,14 +30,10 @@ export function HuggingFaceChatbot() {
   useEffect(() => {
     if (messages.length === 0) {
       setTimeout(() => {
-        const welcomeMessage = userName 
-          ? `Welcome back, ${userName}! It's good to see you again. How are you feeling today?`
-          : "Hi there! I'm MindMend, your personal AI therapist. I'm here to listen and support you. What's your name?"
-        
         setMessages([{
           id: 'welcome',
           role: 'assistant',
-          content: welcomeMessage,
+          content: getWelcomeMessage(userName),
         }])
       }, 500)
     }
@@ -44,23 +48,13 @@ export function HuggingFaceChatbot() {
     if (!input.trim() || isLoading) return
 
     const userInput = input.trim()
-    
+
     // Extract name if user hasn't provided one yet
     if (!userName && messages.length <= 1) {
-      // Simple name extraction - look for common patterns
-      const namePatterns = [
-        /(?:my name is|i'm|i am|call me|this is)\s+([a-z]+)/i,
-        /^([a-z]+)$/i, // Just a single word (likely a name)
-      ]
-      
-      for (const pattern of namePatterns) {
-        const match = userInput.match(pattern)
-        if (match && match[1]) {
-          const extractedName = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase()
-          setUserName(extractedName)
-          localStorage.setItem('mindmend_user_name', extractedName)
-          break
-        }
+      const detectedName = extractUserName(userInput)
+      if (detectedName) {
+        setUserName(detectedName)
+        storeUserName(detectedName)
       }
     }
 
@@ -71,13 +65,11 @@ export function HuggingFaceChatbot() {
 
     try {
       // Build context with user name if available (hidden from UI)
-      const contextPrefix = userName 
-        ? `[Context: User's name is ${userName}. Use their name naturally in conversation when appropriate.]\n\n`
-        : ''
-      
+      const contextPrefix = buildContextPrefix(userName)
+
       // Prepare messages for API with hidden context
       const apiMessages = [...messages, { role: 'user', content: userInput }]
-      
+
       // Add context to the first user message if name exists
       if (userName && apiMessages.length > 0) {
         apiMessages[0] = {
@@ -89,9 +81,9 @@ export function HuggingFaceChatbot() {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          messages: apiMessages, 
-          userId: userName || 'user-1' 
+        body: JSON.stringify({
+          messages: apiMessages,
+          userId: userName || 'user-1'
         })
       })
 
@@ -111,18 +103,6 @@ export function HuggingFaceChatbot() {
     } finally {
       setIsLoading(false)
     }
-  }
-
-  const getEmotionColor = (label) => {
-    const colors = {
-      joy: 'text-emerald-500',
-      love: 'text-pink-500',
-      sadness: 'text-blue-500',
-      anger: 'text-red-500',
-      fear: 'text-amber-500',
-      surprise: 'text-purple-500'
-    }
-    return colors[label?.toLowerCase()] || 'text-gray-500'
   }
 
   return (
@@ -149,24 +129,22 @@ export function HuggingFaceChatbot() {
             <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`group relative max-w-[90%] sm:max-w-[85%] ${m.role === 'user' ? 'ml-8 sm:ml-12' : 'mr-8 sm:mr-12'}`}>
                 {/* Avatar - hidden on mobile */}
-                <div className={`hidden sm:flex absolute top-0 ${m.role === 'user' ? '-right-10' : '-left-10'} w-8 h-8 rounded-full items-center justify-center text-xs font-medium ${
-                  m.role === 'user' 
-                    ? 'bg-blue-600 text-white' 
+                <div className={`hidden sm:flex absolute top-0 ${m.role === 'user' ? '-right-10' : '-left-10'} w-8 h-8 rounded-full items-center justify-center text-xs font-medium ${m.role === 'user'
+                    ? 'bg-blue-600 text-white'
                     : 'bg-gradient-to-br from-purple-500 to-pink-500 text-white'
-                }`}>
+                  }`}>
                   {m.role === 'user' ? 'You' : 'AI'}
                 </div>
 
                 {/* Message bubble */}
-                <div className={`px-3 sm:px-5 py-2.5 sm:py-3 rounded-2xl ${
-                  m.role === 'user'
+                <div className={`px-3 sm:px-5 py-2.5 sm:py-3 rounded-2xl ${m.role === 'user'
                     ? 'bg-blue-600 text-white'
                     : 'bg-gray-800/50 text-gray-100 border border-gray-700/50'
-                }`}>
+                  }`}>
                   <p className="text-sm sm:text-[15px] leading-relaxed whitespace-pre-wrap">
                     {m.content}
                   </p>
-                  
+
                   {/* Emotion tag */}
                   {m.role === 'assistant' && m.data?.emotion?.[0] && (
                     <div className={`mt-2 text-[10px] sm:text-xs font-medium flex items-center gap-1 ${getEmotionColor(m.data.emotion[0].label)}`}>
@@ -196,7 +174,7 @@ export function HuggingFaceChatbot() {
               </div>
             </div>
           )}
-          
+
           <div ref={scrollRef} />
         </div>
       </div>
