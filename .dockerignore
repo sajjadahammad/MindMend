@@ -1,0 +1,25 @@
+# Ignore version control files
+.git
+.gitignore
+
+# Ignore dependencies/build artifacts
+node_modules
+.next
+dist/
+/build
+
+# Ignore development/sensitive files
+*.log
+.env
+.env.local
+.DS_Store
+
+# Ignore test files
+test/
+*.test.js
+jest.config.js
+jest.setup.js
+
+# Ignore documentation
+README.md
+README.deployment.md

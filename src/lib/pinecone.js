@@ -4,7 +4,9 @@ import { PineconeStore } from '@langchain/pinecone';
 import { Document } from '@langchain/core/documents';
 import { InferenceClient } from '@huggingface/inference';
 
-const hf = new InferenceClient(process.env.HF_API_KEY);
+const hf = new InferenceClient(process.env.HF_API_KEY,{
+  defaultProvider: 'hf-inference',
+});
 const EMBEDDING_MODEL = 'BAAI/bge-large-en-v1.5'; // 1024 dimensions
 
 // === EMBEDDING FUNCTIONS ===
@@ -83,7 +85,7 @@ export async function storeConversation(userId, message, role, emotion = null) {
     const store = await getVectorStore();
 
     const metadata = {
-      userId,
+      userId: userId,
       role,
       timestamp: Date.now(),
       ...(emotion && { emotion: emotion.label, emotionScore: emotion.score }),
@@ -102,20 +104,28 @@ export async function storeConversation(userId, message, role, emotion = null) {
 }
 
 // === RETRIEVE CONVERSATIONS ===
-export async function retrieveConversations(userId, query, limit = 5) {
+// src/lib/pinecone.js
+export async function retrieveConversations(userId, query, limit = 10) {
   try {
     const store = await getVectorStore();
 
-    const results = await store.similaritySearch(query, limit, { userId });
+    console.log('Searching Pinecone for user:', userId); // DEBUG
 
-    return results.map(doc => ({
-      content: doc.pageContent,
-      role: doc.metadata.role,
-      timestamp: doc.metadata.timestamp,
-      emotion: doc.metadata.emotion || 'unknown',
-    }));
+    const results = await store.similaritySearch(query, limit, {
+      userId: { $eq: userId } // EXACT MATCH
+    });
+
+    console.log('Pinecone returned:', results.length, 'messages'); // SEE THE TRUTH
+
+    return results.map(doc => {
+      console.log('→', doc.pageContent); // SEE EVERY MESSAGE
+      return {
+        content: doc.pageContent,
+        role: doc.metadata.role,
+      };
+    });
   } catch (error) {
-    console.error('Failed to retrieve:', error.message);
+    console.error('Pinecone FAILED:', error.message);
     return [];
   }
 }

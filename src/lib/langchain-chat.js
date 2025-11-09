@@ -2,7 +2,9 @@
 import { InferenceClient } from '@huggingface/inference';
 import { HumanMessage, AIMessage } from '@langchain/core/messages';
 
-const hf = new InferenceClient(process.env.HF_API_KEY);
+const hf = new InferenceClient(process.env.HF_API_KEY,{
+  defaultProvider: 'hf-inference',
+});
 
 // THIS IS THE ONLY MODEL THAT WORKS 100% WITH chatCompletion ON FREE TIER
 const DEFAULT_MODEL = 'Qwen/Qwen2.5-7B-Instruct';
