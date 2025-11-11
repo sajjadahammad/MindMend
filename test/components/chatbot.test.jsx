@@ -1,13 +1,14 @@
 // test/components/chatbot.test.js
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { HuggingFaceChatbot } from '@/components/huggingface-chatbot';
+import { HuggingFaceChatbot } from '@/components/huggingface-chatbot.jsx';
 
 // Mock fetch
-global.fetch = jest.fn();
+global.fetch = vi.fn();
 
 describe('HuggingFaceChatbot Component', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     localStorage.clear();
   });
 

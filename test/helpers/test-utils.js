@@ -1,4 +1,6 @@
 // test/helpers/test-utils.js
+import { vi } from 'vitest';
+
 /**
  * Test utilities and helpers for consistent testing
  */
@@ -8,7 +10,7 @@
  */
 export function createMockRequest(body) {
   return {
-    json: jest.fn().mockResolvedValue(body),
+    json: vi.fn().mockResolvedValue(body),
     headers: new Map(),
   };
 }
@@ -60,14 +62,14 @@ export function mockLocalStorage() {
   const store = {};
   
   return {
-    getItem: jest.fn((key) => store[key] || null),
-    setItem: jest.fn((key, value) => {
+    getItem: vi.fn((key) => store[key] || null),
+    setItem: vi.fn((key, value) => {
       store[key] = value.toString();
     }),
-    removeItem: jest.fn((key) => {
+    removeItem: vi.fn((key) => {
       delete store[key];
     }),
-    clear: jest.fn(() => {
+    clear: vi.fn(() => {
       Object.keys(store).forEach(key => delete store[key]);
     }),
   };
@@ -77,14 +79,14 @@ export function mockLocalStorage() {
  * Mock fetch responses
  */
 export function mockFetchSuccess(data) {
-  return jest.fn().mockResolvedValue({
+  return vi.fn().mockResolvedValue({
     ok: true,
     json: async () => data,
   });
 }
 
 export function mockFetchError(error = 'Network error') {
-  return jest.fn().mockRejectedValue(new Error(error));
+  return vi.fn().mockRejectedValue(new Error(error));
 }
 
 /**
@@ -123,6 +125,6 @@ export function expectErrorLogged(consoleSpy, message) {
  * Clean up all mocks
  */
 export function cleanupMocks() {
-  jest.clearAllMocks();
-  jest.restoreAllMocks();
+  vi.clearAllMocks();
+  vi.restoreAllMocks();
 }

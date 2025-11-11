@@ -1,4 +1,5 @@
 // test/lib/utils.test.js
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   extractUserName,
   getEmotionColor,

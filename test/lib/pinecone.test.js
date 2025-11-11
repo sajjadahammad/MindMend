@@ -1,4 +1,5 @@
 // test/lib/pinecone.test.js
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import {
   embedText,
   embedTexts,
@@ -10,18 +11,18 @@ import {
 import { InferenceClient } from '@huggingface/inference';
 import { Pinecone } from '@pinecone-database/pinecone';
 
-jest.mock('@huggingface/inference');
-jest.mock('@pinecone-database/pinecone');
-jest.mock('@langchain/pinecone');
+vi.mock('@huggingface/inference');
+vi.mock('@pinecone-database/pinecone');
+vi.mock('@langchain/pinecone');
 
 describe('Pinecone - embedText', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('should embed text successfully', async () => {
     const mockEmbedding = new Array(1024).fill(0.1);
-    InferenceClient.prototype.featureExtraction = jest.fn().mockResolvedValue(mockEmbedding);
+    InferenceClient.prototype.featureExtraction = vi.fn().mockResolvedValue(mockEmbedding);
 
     const result = await embedText('Hello world');
     
@@ -33,7 +34,7 @@ describe('Pinecone - embedText', () => {
   });
 
   it('should handle embedding errors', async () => {
-    InferenceClient.prototype.featureExtraction = jest.fn().mockRejectedValue(
+    InferenceClient.prototype.featureExtraction = vi.fn().mockRejectedValue(
       new Error('API error')
     );
 
@@ -44,7 +45,7 @@ describe('Pinecone - embedText', () => {
 describe('Pinecone - embedTexts', () => {
   it('should embed multiple texts', async () => {
     const mockEmbedding = new Array(1024).fill(0.1);
-    InferenceClient.prototype.featureExtraction = jest.fn().mockResolvedValue(mockEmbedding);
+    InferenceClient.prototype.featureExtraction = vi.fn().mockResolvedValue(mockEmbedding);
 
     const texts = ['Hello', 'World'];
     const results = await embedTexts(texts);
@@ -58,7 +59,7 @@ describe('Pinecone - isPineconeConfigured', () => {
   const originalEnv = process.env;
 
   beforeEach(() => {
-    jest.resetModules();
+    vi.resetModules();
     process.env = { ...originalEnv };
   });
 
@@ -86,7 +87,7 @@ describe('Pinecone - initPinecone', () => {
   const originalEnv = process.env;
 
   beforeEach(() => {
-    jest.resetModules();
+    vi.resetModules();
     process.env = { ...originalEnv };
   });
 
@@ -97,8 +98,8 @@ describe('Pinecone - initPinecone', () => {
   it('should initialize Pinecone client', async () => {
     process.env.PINECONE_API_KEY = 'valid-key';
     
-    const mockClient = { index: jest.fn() };
-    Pinecone.mockImplementation(() => mockClient);
+    const mockClient = { index: vi.fn() };
+    Pinecone.mockImplementation(function() { return mockClient; });
 
     const client = await initPinecone();
     
@@ -120,7 +121,7 @@ describe('Pinecone - storeConversation', () => {
     // This is a complex integration test that would require more mocking
     // For now, we'll test that it doesn't throw
     const mockStore = {
-      addDocuments: jest.fn().mockResolvedValue(undefined)
+      addDocuments: vi.fn().mockResolvedValue(undefined)
     };
 
     // Mock implementation would go here

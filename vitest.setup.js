@@ -1,5 +1,6 @@
-// jest.setup.js
-import '@testing-library/jest-dom';
+import '@testing-library/jest-dom/vitest';
+import { expect, afterEach, vi } from 'vitest';
+import { cleanup } from '@testing-library/react';
 import { TextEncoder, TextDecoder } from 'util';
 import { ReadableStream } from 'stream/web';
 
@@ -9,7 +10,7 @@ global.TextDecoder = TextDecoder;
 global.ReadableStream = ReadableStream;
 
 // Mock scrollIntoView for jsdom
-Element.prototype.scrollIntoView = jest.fn();
+Element.prototype.scrollIntoView = vi.fn();
 
 // Mock Next.js Request/Response
 global.Request = class Request {
@@ -32,3 +33,8 @@ global.Response = class Response {
     return JSON.parse(this.body);
   }
 };
+
+// Cleanup after each test
+afterEach(() => {
+  cleanup();
+});

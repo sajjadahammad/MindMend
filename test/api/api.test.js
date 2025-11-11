@@ -2,18 +2,19 @@
 /**
  * API Route Tests
  * Note: These tests mock the core functionality without importing the route directly
- * to avoid Next.js Request/Response issues in Jest
+ * to avoid Next.js Request/Response issues
  */
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { storeConversation, retrieveConversations } from '@/lib/pinecone';
 import { generateChatResponse } from '@/lib/langchain-chat';
 
 // Mock dependencies
-jest.mock('@/lib/pinecone');
-jest.mock('@/lib/langchain-chat');
+vi.mock('@/lib/pinecone');
+vi.mock('@/lib/langchain-chat');
 
 describe('Chat API Logic', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('should process chat request successfully', async () => {

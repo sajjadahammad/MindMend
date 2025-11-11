@@ -4,15 +4,16 @@
  * These tests verify the end-to-end functionality without importing Next.js routes
  */
 
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { storeConversation, retrieveConversations } from '@/lib/pinecone';
 import { generateChatResponse } from '@/lib/langchain-chat';
 
-jest.mock('@/lib/pinecone');
-jest.mock('@/lib/langchain-chat');
+vi.mock('@/lib/pinecone');
+vi.mock('@/lib/langchain-chat');
 
 describe('Chat Flow Integration', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('should handle complete conversation flow', async () => {
@@ -61,7 +62,7 @@ describe('Chat Flow Integration', () => {
     generateChatResponse.mockResolvedValue('Nice to meet you, John!');
     storeConversation.mockImplementation((userId, message, role) => {
       conversationHistory.push({ userId, message, role });
-      return Promise.resolve();
+      return Promise.resolve(undefined);
     });
 
     await generateChatResponse([{ role: 'user', content: 'My name is John' }]);
@@ -99,7 +100,7 @@ describe('Chat Flow Integration', () => {
     expect(retrieveConversations).toHaveBeenCalledWith('user-1', '', 20);
 
     // User 2 conversation - should not see User 1's data
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     retrieveConversations.mockResolvedValue([]); // Empty for new user
     generateChatResponse.mockResolvedValue('Hello User 2!');
 

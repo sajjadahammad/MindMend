@@ -1,6 +1,6 @@
 # Test Suite
 
-This directory contains comprehensive test cases for the MindMend AI Therapist Chatbot.
+This directory contains comprehensive test cases for the MindMend AI Therapist Chatbot using **Vitest**.
 
 ## Test Structure
 
@@ -10,20 +10,27 @@ test/
 │   └── api.test.js          # API route tests
 ├── components/
 │   └── chatbot.test.js      # React component tests
-└── lib/
-    ├── utils.test.js        # Utility function tests
-    ├── pinecone.test.js     # Pinecone integration tests
-    └── langchain-chat.test.js # LangChain chat tests
+├── integration/
+│   └── chat-flow.test.js    # Integration tests
+├── lib/
+│   ├── utils.test.js        # Utility function tests
+│   ├── pinecone.test.js     # Pinecone integration tests
+│   └── langchain-chat.test.js # LangChain chat tests
+└── helpers/
+    └── test-utils.js        # Test utilities
 ```
 
 ## Running Tests
 
 ```bash
-# Run all tests
+# Run all tests once
 npm test
 
-# Run tests in watch mode
+# Run tests in watch mode (interactive)
 npm run test:watch
+
+# Run tests with UI (browser-based interface)
+npm run test:ui
 
 # Run tests with coverage report
 npm run test:coverage
@@ -72,34 +79,43 @@ npm test -- test/lib/utils.test.js
 
 ## Mocking Strategy
 
-Tests use Jest mocks for external dependencies:
+Tests use Vitest mocks (`vi`) for external dependencies:
 - `@huggingface/inference` - HuggingFace API calls
 - `@pinecone-database/pinecone` - Pinecone vector database
 - `@langchain/pinecone` - LangChain Pinecone integration
 - `fetch` - API calls in components
 
+### Key Differences from Jest:
+- Use `vi.fn()` instead of `jest.fn()`
+- Use `vi.mock()` instead of `jest.mock()`
+- Import test functions: `import { describe, it, expect, vi } from 'vitest'`
+
 ## Environment Setup
 
-Tests automatically use the Jest environment configured in `jest.config.js`:
+Tests automatically use the Vitest environment configured in `vitest.config.js`:
 - `jsdom` environment for React component tests
 - Module path aliases (`@/`) are resolved correctly
-- Setup file (`jest.setup.js`) loads testing library extensions
+- Setup file (`vitest.setup.js`) loads testing library extensions
+- Global test functions (`describe`, `it`, `expect`) are available without imports
 
 ## Writing New Tests
 
 When adding new tests:
 
 1. Place them in the appropriate directory (`api/`, `components/`, or `lib/`)
-2. Use descriptive test names with `it('should...')`
-3. Mock external dependencies
-4. Clean up mocks in `beforeEach()`
-5. Test both success and error cases
+2. Import test functions: `import { describe, it, expect, beforeEach, vi } from 'vitest'`
+3. Use descriptive test names with `it('should...')`
+4. Mock external dependencies with `vi.mock()`
+5. Clean up mocks in `beforeEach()` with `vi.clearAllMocks()`
+6. Test both success and error cases
 
 Example:
 ```javascript
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
 describe('MyFeature', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('should handle success case', () => {
@@ -111,6 +127,15 @@ describe('MyFeature', () => {
   });
 });
 ```
+
+## Why Vitest?
+
+Vitest offers several advantages over Jest:
+- **Faster**: Native ESM support and Vite's speed
+- **Better DX**: Hot module reload in watch mode
+- **Modern**: Built for modern JavaScript/TypeScript
+- **Compatible**: Jest-compatible API (easy migration)
+- **UI Mode**: Beautiful browser-based test UI
 
 ## CI/CD Integration
 

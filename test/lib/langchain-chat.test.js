@@ -1,4 +1,5 @@
 // test/lib/langchain-chat.test.js
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   generateChatResponse,
   analyzeEmotion,
@@ -9,11 +10,11 @@ import {
 import { InferenceClient } from '@huggingface/inference';
 import { HumanMessage, AIMessage } from '@langchain/core/messages';
 
-jest.mock('@huggingface/inference');
+vi.mock('@huggingface/inference');
 
 describe('LangChain Chat - generateChatResponse', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('should generate chat response successfully', async () => {
@@ -23,7 +24,7 @@ describe('LangChain Chat - generateChatResponse', () => {
       ]
     };
 
-    InferenceClient.prototype.chatCompletion = jest.fn().mockResolvedValue(mockResponse);
+    InferenceClient.prototype.chatCompletion = vi.fn().mockResolvedValue(mockResponse);
 
     const messages = [new HumanMessage('Hello')];
     const response = await generateChatResponse(messages);
@@ -37,7 +38,7 @@ describe('LangChain Chat - generateChatResponse', () => {
       choices: [{ message: { content: 'Response' } }]
     };
 
-    InferenceClient.prototype.chatCompletion = jest.fn().mockResolvedValue(mockResponse);
+    InferenceClient.prototype.chatCompletion = vi.fn().mockResolvedValue(mockResponse);
 
     const messages = [new HumanMessage('Test')];
     await generateChatResponse(messages, {
@@ -56,7 +57,7 @@ describe('LangChain Chat - generateChatResponse', () => {
   });
 
   it('should handle API errors', async () => {
-    InferenceClient.prototype.chatCompletion = jest.fn().mockRejectedValue(
+    InferenceClient.prototype.chatCompletion = vi.fn().mockRejectedValue(
       new Error('API error')
     );
 
@@ -74,7 +75,7 @@ describe('LangChain Chat - analyzeEmotion', () => {
       { label: 'joy', score: 0.85 }
     ];
 
-    InferenceClient.prototype.textClassification = jest.fn().mockResolvedValue(mockResult);
+    InferenceClient.prototype.textClassification = vi.fn().mockResolvedValue(mockResult);
 
     const result = await analyzeEmotion('I am so happy today!');
 
@@ -82,7 +83,7 @@ describe('LangChain Chat - analyzeEmotion', () => {
   });
 
   it('should return neutral on error', async () => {
-    InferenceClient.prototype.textClassification = jest.fn().mockRejectedValue(
+    InferenceClient.prototype.textClassification = vi.fn().mockRejectedValue(
       new Error('API error')
     );
 
