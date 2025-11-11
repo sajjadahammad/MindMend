@@ -22,7 +22,7 @@ export async function POST(req) {
           .join(' | ');
 
         pastSummary = `REAL PAST MESSAGES FROM THIS USER: "${userMsgs}"`;
-        console.log('USING REAL MEMORY:', pastSummary);
+        // console.log('USING REAL MEMORY:', pastSummary);
       }
     } catch (e) {
       console.error('Memory failed');
