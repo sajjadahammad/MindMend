@@ -1,88 +1,138 @@
-// src/lib/langchain-chat.js
 import { InferenceClient } from '@huggingface/inference';
-import { HumanMessage, AIMessage } from '@langchain/core/messages';
 
-const hf = new InferenceClient(process.env.HF_API_KEY,{
-  defaultProvider: 'hf-inference',
-});
+const hf = new InferenceClient(process.env.HF_API_KEY);
 
-// THIS IS THE ONLY MODEL THAT WORKS 100% WITH chatCompletion ON FREE TIER
-const DEFAULT_MODEL = 'Qwen/Qwen2.5-7B-Instruct';
-
-export async function generateChatResponse(messages, options = {}) {
-  const { model = DEFAULT_MODEL, maxTokens = 300, temperature = 0.7 } = options;
-
-  // Convert LangChain messages → OpenAI format
-  const openAIMessages = messages.map(msg => {
-    if (msg instanceof HumanMessage || msg.role === 'user') {
-      return { role: 'user', content: msg.content };
-    }
-    if (msg instanceof AIMessage || msg.role === 'assistant') {
-      return { role: 'assistant', content: msg.content };
-    }
-    return { role: 'user', content: msg.content };
-  });
-
-  try {
-    const result = await hf.chatCompletion({
-      model,
-      messages: [
-        {
-          role: 'system',
-          content: `You are a warm, empathetic AI therapist. 
-Be supportive, never clinical. Validate feelings. Ask gentle questions. 
-Never give medical advice. Sound like a caring friend.`
-        },
-        ...openAIMessages
-      ],
-      max_tokens: maxTokens,
-      temperature,
-      stream: false,
-    });
-
-    return result.choices[0].message.content.trim();
-  } catch (error) {
-    console.error('HF Error:', error);
-    throw new Error('AI is busy — try again in 10s');
-  }
-}
-
-// Keep your existing helpers
+/**
+ * Analyze emotion from text using HuggingFace
+ */
 export async function analyzeEmotion(text) {
   try {
     const result = await hf.textClassification({
-      model: 'bhadresh-savani/distilbert-base-uncased-emotion',
+      model: 'SamLowe/roberta-base-go_emotions',
       inputs: text,
     });
-    const top = result[0];
-    return { label: top.label.toLowerCase(), score: top.score };
-  } catch {
-    return { label: 'neutral', score: 0 };
+
+    // Return top emotion
+    return result.length > 0 ? result[0] : null;
+  } catch (error) {
+    console.error('Emotion analysis error:', error);
+    return null;
   }
 }
 
-export function enhanceResponseWithEmotion(response, emotion) {
-  if (emotion.score < 0.6) return response;
-  const prefixes = {
-    sadness: "I'm really sorry you're feeling this way... ",
-    anger: "I can hear how frustrated you are, and that's completely valid. ",
-    fear: "It's okay to feel scared sometimes. You're not alone. ",
-    joy: "This makes me smile too! ",
-  };
-  const prefix = prefixes[emotion.label];
-  return prefix ? prefix + response : response;
+/**
+ * Generate embeddings for semantic search
+ */
+export async function generateEmbedding(text) {
+  try {
+    const response = await hf.featureExtraction({
+      model: 'sentence-transformers/stsb-roberta-large',
+      inputs: text,
+    });
+    
+    return Array.isArray(response) ? response : Array.from(response);
+  } catch (error) {
+    console.error('Embedding generation error:', error);
+    throw error;
+  }
 }
 
-export function buildPastContext(pastConversations) {
-  if (!pastConversations?.length) return '';
-  return '\nRelevant past moments:\n' + pastConversations
-    .slice(0, 3)
-    .map(c => `[${new Date(c.timestamp).toLocaleDateString()}] ${c.role}: ${c.content}`)
-    .join('\n');
+/**
+ * Generate chat response using HuggingFace Inference API
+ * NOTE: This is for non-streaming responses
+ */
+export async function generateChatResponse(messages, options = {}) {
+  try {
+    // Convert LangChain messages to HuggingFace chat format
+    const chatMessages = messages.map(msg => {
+      const role = msg._getType() === 'system' ? 'system' : 
+                   msg._getType() === 'human' ? 'user' : 'assistant';
+      return {
+        role,
+        content: msg.content
+      };
+    });
+
+    // Use chatCompletion for conversational models
+    const response = await hf.chatCompletion({
+      model: options.model || 'Qwen/Qwen2.5-7B-Instruct',
+      messages: chatMessages,
+      temperature: options.temperature || 0.7,
+      max_tokens: options.maxTokens || 500,
+    });
+
+    return response.choices[0].message.content.trim();
+    
+  } catch (error) {
+    console.error('Chat generation error:', error);
+    throw error;
+  }
 }
 
-export function convertToLangChainMessages(messages) {
-  return messages.map(m => 
-    m.role === 'user' ? new HumanMessage(m.content) : new AIMessage(m.content)
-  );
+/**
+ * Build therapeutic system prompt with user context
+ */
+export function buildTherapistPrompt(userId, userContext = '') {
+  return `You are a professional, empathetic therapist AI. 
+
+YOUR IDENTITY:
+- You are speaking with ONE specific user (ID: ${userId.substring(0, 8)}...)
+- You have access ONLY to this user's conversation history
+- NEVER reference or mention other users or their conversations
+
+YOUR APPROACH:
+- Use active listening and reflection techniques
+- Ask open-ended questions to understand deeper
+- Validate feelings without judgment
+- Provide gentle insights when appropriate
+- Format responses clearly with proper line breaks
+
+BOUNDARIES:
+- Stay focused on mental health and emotional support
+- If asked about unrelated topics, gently redirect
+- Never fabricate memories or make assumptions
+- If you don't remember something, acknowledge it honestly
+
+${userContext ? `CONTEXT FROM PAST CONVERSATIONS:\n${userContext}\n` : ''}
+
+Remember: Every user deserves your full, undivided attention. Focus on THEIR unique journey.`;
+}
+
+/**
+ * Format conversation history for context
+ */
+export function formatConversationHistory(conversations, maxMessages = 5) {
+  if (!conversations || conversations.length === 0) {
+    return '';
+  }
+
+  return conversations
+    .slice(-maxMessages)
+    .map(conv => {
+      const role = conv.role === 'user' ? 'User' : 'Therapist';
+      return `${role}: ${conv.content}`;
+    })
+    .join('\n\n');
+}
+
+/**
+ * Sanitize and validate user input
+ */
+export function sanitizeUserInput(input) {
+  if (!input || typeof input !== 'string') {
+    throw new Error('Invalid input');
+  }
+
+  // Remove potential injection attempts
+  return input
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .trim()
+    .slice(0, 2000); // Limit length
+}
+
+/**
+ * Create user-specific conversation ID
+ */
+export function createConversationId(userId, timestamp = Date.now()) {
+  return `${userId}-${timestamp}`;
 }

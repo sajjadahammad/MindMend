@@ -1,131 +1,238 @@
 // src/lib/pinecone.js
 import { Pinecone } from '@pinecone-database/pinecone';
-import { PineconeStore } from '@langchain/pinecone';
-import { Document } from '@langchain/core/documents';
-import { InferenceClient } from '@huggingface/inference';
+import { generateEmbedding } from './langchain-chat';
 
-const hf = new InferenceClient(process.env.HF_API_KEY,{
-  defaultProvider: 'hf-inference',
+// Initialize Pinecone
+const pinecone = new Pinecone({
+  apiKey: process.env.PINECONE_API_KEY,
 });
-const EMBEDDING_MODEL = 'BAAI/bge-large-en-v1.5'; // 1024 dimensions
 
-// === EMBEDDING FUNCTIONS ===
-export async function embedText(text) {
+const indexName = process.env.PINECONE_INDEX_NAME || 'therapy-chat';
+const index = pinecone.index(indexName);
+
+/**
+ * Store conversation with STRICT user isolation
+ */
+export async function storeConversation(userId, content, role, metadata = {}) {
   try {
-    const result = await hf.featureExtraction({
-      model: EMBEDDING_MODEL,
-      inputs: text,
-    });
-    return Array.from(result);
+    // Validate inputs
+    if (!userId || !content || !role) {
+      throw new Error('Missing required fields: userId, content, or role');
+    }
+
+    // Generate embedding
+    const embedding = await generateEmbedding(content);
+    
+    // Create unique ID with userId prefix for guaranteed isolation
+    const recordId = `${userId}::${Date.now()}::${role}`;
+    
+    // Store with userId in MULTIPLE places for defense in depth
+    await index.upsert([{
+      id: recordId,
+      values: embedding,
+      metadata: {
+        userId,           // PRIMARY: Filter field
+        content,
+        role,
+        timestamp: new Date().toISOString(),
+        createdAt: Date.now(),
+        recordType: 'conversation',
+        ...metadata,
+        // Store userId again in a prefixed field as backup
+        user_id_backup: userId,
+      }
+    }]);
+
+    console.log(`✓ Stored conversation for user ${userId.substring(0, 8)}...`);
+    return recordId;
+
   } catch (error) {
-    console.error('Embedding error:', error);
+    console.error('❌ Store conversation error:', error);
+    throw new Error(`Failed to store conversation: ${error.message}`);
+  }
+}
+
+/**
+ * Retrieve conversations with STRICT user isolation
+ */
+export async function retrieveConversations(userId, query, topK = 5) {
+  try {
+    // Validate userId
+    if (!userId || typeof userId !== 'string') {
+      throw new Error('Invalid userId provided');
+    }
+
+    // Generate query embedding
+    const queryEmbedding = await generateEmbedding(
+      query || "recent conversation context"
+    );
+    
+    // Query with STRICT user filter
+    const results = await index.query({
+      vector: queryEmbedding,
+      topK: topK * 3, // Over-fetch to ensure we have enough after filtering
+      includeMetadata: true,
+      // CRITICAL: Only return this user's data
+      filter: {
+        userId: { $eq: userId },
+        recordType: { $eq: 'conversation' }
+      }
+    });
+
+    if (!results.matches || results.matches.length === 0) {
+      console.log(`ℹ️  No conversations found for user ${userId.substring(0, 8)}...`);
+      return [];
+    }
+
+    // Defense in depth: Double-check userId in results
+    const userConversations = results.matches
+      .filter(match => {
+        // Ensure metadata exists and userId matches
+        if (!match.metadata) return false;
+        
+        // Check both primary and backup userId fields
+        const primaryMatch = match.metadata.userId === userId;
+        const backupMatch = match.metadata.user_id_backup === userId;
+        
+        return primaryMatch || backupMatch;
+      })
+      .slice(0, topK) // Limit to requested amount
+      .map(match => ({
+        id: match.id,
+        score: match.score,
+        ...match.metadata
+      }))
+      // Sort by timestamp (most recent first)
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    console.log(`✓ Retrieved ${userConversations.length} conversations for user ${userId.substring(0, 8)}...`);
+    return userConversations;
+
+  } catch (error) {
+    console.error('❌ Retrieve conversations error:', error);
+    // Return empty array instead of throwing to prevent app crashes
+    return [];
+  }
+}
+
+/**
+ * Get recent conversations (chronological, not semantic)
+ */
+export async function getRecentConversations(userId, limit = 10) {
+  try {
+    // For recent conversations, we need to query with a dummy vector
+    // and rely on metadata filtering
+    const dummyEmbedding = await generateEmbedding("recent messages");
+    
+    const results = await index.query({
+      vector: dummyEmbedding,
+      topK: limit * 2,
+      includeMetadata: true,
+      filter: {
+        userId: { $eq: userId }
+      }
+    });
+
+    return results.matches
+      .filter(match => match.metadata?.userId === userId)
+      .sort((a, b) => {
+        const timeA = new Date(a.metadata.timestamp).getTime();
+        const timeB = new Date(b.metadata.timestamp).getTime();
+        return timeB - timeA; // Most recent first
+      })
+      .slice(0, limit)
+      .map(match => match.metadata);
+
+  } catch (error) {
+    console.error('Get recent conversations error:', error);
+    return [];
+  }
+}
+
+/**
+ * Delete user's conversation history (for privacy/GDPR)
+ */
+export async function deleteUserConversations(userId) {
+  try {
+    if (!userId) {
+      throw new Error('userId is required');
+    }
+
+    // Pinecone doesn't support delete by metadata filter directly
+    // We need to fetch all IDs first, then delete them
+    const conversations = await getRecentConversations(userId, 1000);
+    
+    if (conversations.length === 0) {
+      console.log(`No conversations to delete for user ${userId}`);
+      return 0;
+    }
+
+    const idsToDelete = conversations
+      .map(conv => conv.id)
+      .filter(id => id && id.startsWith(userId));
+
+    if (idsToDelete.length > 0) {
+      await index.deleteMany(idsToDelete);
+      console.log(`✓ Deleted ${idsToDelete.length} conversations for user ${userId}`);
+    }
+
+    return idsToDelete.length;
+
+  } catch (error) {
+    console.error('Delete user conversations error:', error);
     throw error;
   }
 }
 
-export async function embedTexts(texts) {
-  const embeddings = [];
-  for (const text of texts) {
-    const vec = await embedText(text);
-    embeddings.push(vec);
-  }
-  return embeddings;
-}
-
-// === CREATE EMBEDDINGS OBJECT ===
-const createEmbeddings = () => ({
-  embedQuery: async (text) => await embedText(text),
-  embedDocuments: async (texts) => await embedTexts(texts),
-});
-
-// === PINECONE SETUP ===
-let pineconeClient = null;
-let vectorStore = null;
-
-export async function initPinecone() {
-  if (!process.env.PINECONE_API_KEY || process.env.PINECONE_API_KEY.includes('your-key')) {
-    throw new Error('Set PINECONE_API_KEY in .env');
-  }
-
-  if (pineconeClient) return pineconeClient;
-
-  pineconeClient = new Pinecone({
-    apiKey: process.env.PINECONE_API_KEY,
-  });
-
-  return pineconeClient;
-}
-
-// === VECTOR STORE ===
-export async function getVectorStore() {
-  if (vectorStore) return vectorStore;
-
-  await initPinecone();
-  const index = pineconeClient.index(process.env.PINECONE_INDEX_NAME || 'chat-conversations');
-
-  // Create embeddings object with required methods
-  const embeddings = createEmbeddings();
-
-  vectorStore = new PineconeStore(embeddings, {
-    pineconeIndex: index,
-    namespace: 'conversations',
-  });
-
-  return vectorStore;
-}
-
-// === CONFIG CHECK ===
-export function isPineconeConfigured() {
-  return !!(process.env.PINECONE_API_KEY && !process.env.PINECONE_API_KEY.includes('your-key'));
-}
-
-// === STORE CONVERSATION ===
-export async function storeConversation(userId, message, role, emotion = null) {
+/**
+ * Get user statistics (for debugging/monitoring)
+ */
+export async function getUserStats(userId) {
   try {
-    const store = await getVectorStore();
-
-    const metadata = {
-      userId: userId,
-      role,
-      timestamp: Date.now(),
-      ...(emotion && { emotion: emotion.label, emotionScore: emotion.score }),
+    const recent = await getRecentConversations(userId, 100);
+    
+    return {
+      userId,
+      totalMessages: recent.length,
+      userMessages: recent.filter(m => m.role === 'user').length,
+      assistantMessages: recent.filter(m => m.role === 'assistant').length,
+      firstMessage: recent[recent.length - 1]?.timestamp,
+      lastMessage: recent[0]?.timestamp,
     };
-
-    const doc = new Document({
-      pageContent: message,
-      metadata,
-    });
-
-    await store.addDocuments([doc]);
-    console.log('✓ Stored:', role, message.slice(0, 50) + '...');
   } catch (error) {
-    console.error('Failed to store in Pinecone:', error.message);
+    console.error('Get user stats error:', error);
+    return null;
   }
 }
 
-// === RETRIEVE CONVERSATIONS ===
-// src/lib/pinecone.js
-export async function retrieveConversations(userId, query, limit = 10) {
+/**
+ * Initialize index with proper schema (run once)
+ */
+export async function initializePineconeIndex() {
   try {
-    const store = await getVectorStore();
+    const indexList = await pinecone.listIndexes();
+    const indexExists = indexList.indexes?.some(idx => idx.name === indexName);
 
-    console.log('Searching Pinecone for user:', userId); // DEBUG
-
-    const results = await store.similaritySearch(query, limit, {
-      userId: { $eq: userId } // EXACT MATCH
-    });
-
-    console.log('Pinecone returned:', results.length, 'messages'); // SEE THE TRUTH
-
-    return results.map(doc => {
-      console.log('→', doc.pageContent); // SEE EVERY MESSAGE
-      return {
-        content: doc.pageContent,
-        role: doc.metadata.role,
-      };
-    });
+    if (!indexExists) {
+      await pinecone.createIndex({
+        name: indexName,
+        dimension: 384, // all-MiniLM-L6-v2 dimension
+        metric: 'cosine',
+        spec: {
+          serverless: {
+            cloud: 'aws',
+            region: 'us-east-1'
+          }
+        }
+      });
+      console.log(`✓ Created Pinecone index: ${indexName}`);
+    } else {
+      console.log(`✓ Pinecone index already exists: ${indexName}`);
+    }
   } catch (error) {
-    console.error('Pinecone FAILED:', error.message);
-    return [];
+    console.error('Initialize Pinecone error:', error);
+    throw error;
   }
 }
+
+export { index };

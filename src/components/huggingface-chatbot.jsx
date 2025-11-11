@@ -1,30 +1,45 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useRef, useEffect, useState } from 'react'
+import { useChat } from '@ai-sdk/react'
+import { DefaultChatTransport } from 'ai'
 import { Brain, Send } from 'lucide-react'
-import { 
-  extractUserName, 
-  getEmotionColor, 
-  getWelcomeMessage, 
-  buildContextPrefix,
+import {
+  extractUserName,
+  getEmotionColor,
+  getWelcomeMessage,
   storeUserName,
-  getUserName
+  getUserName,
+  renderFormattedMessage,
+  getMessageContentAndEmotion
 } from '@/lib/utils'
 
 export function HuggingFaceChatbot() {
-  const [messages, setMessages] = useState([])
-  const [input, setInput] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
   const [userName, setUserName] = useState('')
+  const [input, setInput] = useState('')
   const scrollRef = useRef(null)
 
-  // Load user name from localStorage on mount
+  // Load user name
   useEffect(() => {
     const storedName = getUserName()
-    if (storedName) {
-      setUserName(storedName)
-    }
+    if (storedName) setUserName(storedName)
   }, [])
+
+  const { messages, sendMessage, status, setMessages } = useChat({
+    transport: new DefaultChatTransport({
+      api: '/api/chat',
+      body: () => ({
+        userId: userName ? `user_${userName.toLowerCase()}` : 'anonymous'
+      })
+    }),
+    initialMessages: [],
+    onFinish: ({ message }) => {
+      console.log('Message finished:', message);
+      console.log('Metadata:', message.metadata);
+    }
+  })
+
+  console.log('d',messages);
 
   // Welcome message
   useEffect(() => {
@@ -33,77 +48,37 @@ export function HuggingFaceChatbot() {
         setMessages([{
           id: 'welcome',
           role: 'assistant',
-          content: getWelcomeMessage(userName),
+          parts: [{ type: 'text', text: getWelcomeMessage(userName) }]
         }])
-      }, 500)
+      }, 700)
     }
-  }, [userName])
+  }, [userName, messages.length, setMessages])
 
+  // Auto scroll
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!input.trim() || isLoading) return
+    if (!input.trim() || status !== 'ready') return
 
     const userInput = input.trim()
 
-    // Extract name if user hasn't provided one yet
+    // Extract name
     if (!userName && messages.length <= 1) {
-      const detectedName = extractUserName(userInput)
-      if (detectedName) {
-        setUserName(detectedName)
-        storeUserName(detectedName)
+      const name = extractUserName(userInput)
+      if (name) {
+        setUserName(name)
+        storeUserName(name)
       }
     }
 
-    const userMsg = { id: Date.now().toString(), role: 'user', content: userInput }
-    setMessages(prev => [...prev, userMsg])
+    sendMessage({ text: userInput })
     setInput('')
-    setIsLoading(true)
-
-    try {
-      // Build context with user name if available (hidden from UI)
-      const contextPrefix = buildContextPrefix(userName)
-
-      // Prepare messages for API with hidden context
-      const apiMessages = [...messages, { role: 'user', content: userInput }]
-
-      // Add context to the first user message if name exists
-      if (userName && apiMessages.length > 0) {
-        apiMessages[0] = {
-          ...apiMessages[0],
-          content: contextPrefix + apiMessages[0].content
-        }
-      }
-
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: apiMessages,
-          userId: userName || 'user-1'
-        })
-      })
-
-      const data = await res.json()
-      setMessages(prev => [...prev, {
-        id: data.id,
-        role: 'assistant',
-        content: data.content,
-        data: data.data
-      }])
-    } catch (err) {
-      setMessages(prev => [...prev, {
-        id: Date.now().toString(),
-        role: 'assistant',
-        content: "I'm having trouble connecting right now. Could you try again?"
-      }])
-    } finally {
-      setIsLoading(false)
-    }
   }
+
+  const isLoading = status === 'submitted' || status === 'streaming'
 
   return (
     <div className="flex flex-col h-screen w-full max-w-5xl mx-auto">
@@ -125,50 +100,57 @@ export function HuggingFaceChatbot() {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 sm:py-8">
         <div className="space-y-4 sm:space-y-6 max-w-3xl mx-auto">
-          {messages.map(m => (
-            <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`group relative max-w-[90%] sm:max-w-[85%] ${m.role === 'user' ? 'ml-8 sm:ml-12' : 'mr-8 sm:mr-12'}`}>
-                {/* Avatar - hidden on mobile */}
-                <div className={`hidden sm:flex absolute top-0 ${m.role === 'user' ? '-right-10' : '-left-10'} w-8 h-8 rounded-full items-center justify-center text-xs font-medium ${m.role === 'user'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gradient-to-br from-purple-500 to-pink-500 text-white'
-                  }`}>
-                  {m.role === 'user' ? 'You' : 'AI'}
-                </div>
+          {messages.map(m => {
+            const { fullText, emotion } = getMessageContentAndEmotion(m);
 
-                {/* Message bubble */}
-                <div className={`px-3 sm:px-5 py-2.5 sm:py-3 rounded-2xl ${m.role === 'user'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-800/50 text-gray-100 border border-gray-700/50'
-                  }`}>
-                  <p className="text-sm sm:text-[15px] leading-relaxed whitespace-pre-wrap">
-                    {m.content}
-                  </p>
+            return (
+              <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`group relative max-w-[90%] sm:max-w-[85%] ${m.role === 'user' ? 'ml-8 sm:ml-12' : 'mr-8 sm:mr-12'}`}>
+                  {/* Avatar */}
+                  <div className={`hidden sm:flex absolute top-0 ${m.role === 'user' ? '-right-10' : '-left-10'} w-8 h-8 rounded-full items-center justify-center text-xs font-medium ${m.role === 'user'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gradient-to-br from-purple-500 to-pink-500 text-white'
+                    }`}>
+                    {m.role === 'user' ? 'You' : 'AI'}
+                  </div>
 
-                  {/* Emotion tag */}
-                  {m.role === 'assistant' && m.data?.emotion?.[0] && (
-                    <div className={`mt-2 text-[10px] sm:text-xs font-medium flex items-center gap-1 ${getEmotionColor(m.data.emotion[0].label)}`}>
-                      <span className="opacity-60">Detected:</span>
-                      <span className="capitalize">{m.data.emotion[0].label}</span>
+                  {/* Message Bubble */}
+                  <div className={`px-4 sm:px-6 py-3.5 sm:py-4 rounded-3xl shadow-lg ${m.role === 'user'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-800/70 text-gray-100 border border-gray-700/60 backdrop-blur-sm'
+                    }`}>
+                    <div className="text-sm sm:text-base leading-relaxed whitespace-pre-wrap break-words">
+                      {renderFormattedMessage(fullText)}
                     </div>
-                  )}
+
+                    {/* Emotion Tag */}
+                    {m.role === 'assistant' && emotion && (
+                      <div className={`mt-3 pt-2 border-t border-gray-600/40 flex items-center gap-2 text-xs font-semibold ${getEmotionColor(emotion.label)}`}>
+                        <span className="opacity-70">I hear</span>
+                        <span className="capitalize underline decoration-wavy">
+                          {emotion.label}
+                        </span>
+                        <span className="opacity-70">in your words</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
 
-          {/* Loading indicator */}
+          {/* Loading */}
           {isLoading && (
             <div className="flex justify-start">
               <div className="mr-8 sm:mr-12 relative">
                 <div className="hidden sm:flex absolute -left-10 top-0 w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 items-center justify-center text-xs font-medium text-white">
                   AI
                 </div>
-                <div className="bg-gray-800/50 border border-gray-700/50 px-3 sm:px-5 py-2.5 sm:py-3 rounded-2xl">
-                  <div className="flex gap-1">
-                    <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                    <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                    <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                <div className="bg-gray-800/70 backdrop-blur-sm border border-gray-700/60 px-6 py-4 rounded-3xl shadow-lg">
+                  <div className="flex gap-2">
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-100"></div>
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-200"></div>
                   </div>
                 </div>
               </div>
@@ -179,7 +161,7 @@ export function HuggingFaceChatbot() {
         </div>
       </div>
 
-      {/* Input area */}
+      {/* Input */}
       <div className="flex-none border-t border-gray-800/50 backdrop-blur-sm">
         <form onSubmit={handleSubmit} className="max-w-3xl mx-auto px-3 sm:px-6 py-3 sm:py-4">
           <div className="relative flex items-center gap-2">
@@ -189,15 +171,15 @@ export function HuggingFaceChatbot() {
               onChange={e => setInput(e.target.value)}
               placeholder="Message MindMend..."
               disabled={isLoading}
-              className="flex-1 bg-gray-800/50 border border-gray-700/50 rounded-xl px-3 sm:px-4 py-2.5 sm:py-3 text-sm sm:text-base text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent disabled:opacity-50 transition-all"
+              className="flex-1 bg-gray-800/50 border border-gray-700/50 rounded-xl px-4 sm:px-5 py-3.5 text-sm sm:text-base text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent disabled:opacity-50 transition-all"
               autoFocus
             />
             <button
               type="submit"
               disabled={isLoading || !input.trim()}
-              className="flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex-shrink-0"
+              className="flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex-shrink-0 shadow-lg"
             >
-              <Send className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+              <Send className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
             </button>
           </div>
           <p className="text-[10px] sm:text-xs text-gray-500 mt-2 text-center px-2">

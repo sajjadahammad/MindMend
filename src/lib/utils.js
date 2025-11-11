@@ -78,3 +78,89 @@ export function getUserName() {
   }
   return null
 }
+
+// // Message formatting functions
+// export function formatMessageLine(line, index) {
+//   // Bold: **text**
+//   if (line.match(/^\*\*.*\*\*$/)) {
+//     return <p key={index} className="font-bold text-base sm:text-lg my-2">{line.replace(/\*\*/g, '')}</p>
+//   }
+//   // Italic: *text*
+//   if (line.match(/^\*.*\*$/)) {
+//     return <p key={index} className="italic opacity-90 my-1">{line.replace(/\*/g, '')}</p>
+//   }
+//   // Bullet points
+//   if (line.trim().startsWith('•') || line.trim().startsWith('-') || line.trim().startsWith('*')) {
+//     return (
+//       <p key={index} className="ml-4 flex items-start gap-2">
+//         <span className="text-blue-400 mt-1">•</span>
+//         <span>{line.replace(/^[\s•\-\*]+/, '').trim()}</span>
+//       </p>
+//     )
+//   }
+//   // Numbered list
+//   if (/^\d+\.\s/.test(line)) {
+//     return (
+//       <p key={index} className="ml-4 flex items-start gap-2">
+//         <span className="text-blue-400 font-medium">{line.match(/^\d+/)[0]}.</span>
+//         <span>{line.replace(/^\d+\.\s*/, '')}</span>
+//       </p>
+//     )
+//   }
+//   // Default paragraph
+//   return <p key={index} className="mb-2 last:mb-0">{line}</p>
+// }
+
+export function renderFormattedMessage(text) {
+  const lines = text.split('\n');
+  return lines.map((line, i) => {
+    if (line.startsWith('**') && line.endsWith('**')) {
+      return <strong key={i} className="font-bold text-base">{line.slice(2, -2)}</strong>;
+    }
+    if (line.startsWith('*') && line.endsWith('*')) {
+      return <em key={i} className="italic">{line.slice(1, -1)}</em>;
+    }
+    if (line.startsWith('• ') || line.startsWith('- ')) {
+      return (
+        <div key={i} className="flex items-center gap-2 ml-4">
+          <span className="text-blue-400">•</span>
+          <span>{line.replace(/^[\s•\-]+/, '')}</span>
+        </div>
+      );
+    }
+    return <p key={i} className="mb-1">{line}</p>;
+  });
+}
+
+// src/lib/utils.ts
+
+// === EXTRACT FULL TEXT + EMOTION FROM AI MESSAGE ===
+export function getMessageContentAndEmotion(message) {
+  // Handle different message formats
+  let fullText = '';
+  
+  // Try content string first (most common for streaming)
+  if (typeof message.content === 'string') {
+    fullText = message.content;
+  }
+  // Try parts array (for structured messages)
+  else if (message.parts && Array.isArray(message.parts)) {
+    fullText = message.parts
+      .filter((p) => p.type === 'text')
+      .map((p) => p.text || '')
+      .join('');
+  }
+  // Fallback to empty string
+  else {
+    fullText = '';
+  }
+
+  // Extract emotion (supports multiple formats)
+  const emotion = 
+    message.experimental_attachments?.emotion?.[0] ||
+    message.metadata?.emotion?.[0] ||
+    message.emotion?.[0] ||
+    null;
+
+  return { fullText, emotion };
+}
