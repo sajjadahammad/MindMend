@@ -109,13 +109,13 @@ export async function retrieveConversations(userId, query, limit = 10) {
   try {
     const store = await getVectorStore();
 
-    console.log('Searching Pinecone for user:', userId); // DEBUG
+    // console.log('Searching Pinecone for user:', userId); // DEBUG
 
     const results = await store.similaritySearch(query, limit, {
       userId: { $eq: userId } // EXACT MATCH
     });
 
-    console.log('Pinecone returned:', results.length, 'messages'); // SEE THE TRUTH
+    // console.log('Pinecone returned:', results.length, 'messages'); // SEE THE TRUTH
 
     return results.map(doc => {
       console.log('→', doc.pageContent); // SEE EVERY MESSAGE
